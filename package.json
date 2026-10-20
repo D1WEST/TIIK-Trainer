@@ -1,0 +1,1 @@
+{"name":"tiik-trainer","version":"1.0.0","private":true,"description":"Portable offline exam trainer from the local TIIK task bank","scripts":{"start":"node server.cjs --open","test":"node tools/test.cjs"},"engines":{"node":">=18"}}
