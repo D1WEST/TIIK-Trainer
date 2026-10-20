@@ -6,9 +6,7 @@
   if(window.mermaid)mermaid.initialize({startOnLoad:false,securityLevel:'strict',theme:'base',themeVariables:{fontFamily:'Segoe UI, Arial, sans-serif',primaryColor:'#edf4ff',primaryTextColor:'#244c81',primaryBorderColor:'#acc9f6',lineColor:'#90add4'},flowchart:{htmlLabels:false,useMaxWidth:true}});
   let storageError = false, corruptStorage = false;
   const fresh = () => ({ version: 1, attempts: [], sessions: [], bookmarks: [], active: null });
-  let progress;
-  try { const raw = localStorage.getItem(KEY); progress = raw ? JSON.parse(raw) : fresh(); if (!validProgress(progress)) throw Error('invalid'); }
-  catch (e) { progress = fresh(); corruptStorage = true; }
+  let progress = fresh();
   let page = location.hash.slice(1) || 'home', selected = new Set(bank.topics.map(t => t.id)), mode = 'all', count = 20, days = 7, mix = true;
   let topicSearch = '', statsSearch = '', statsFilter = 'all', statsTopic = 'all', theoryTopic = bank.topics[0].id, resultId = null, detailId = null, returnPage = 'stats', showSolution = false, installPrompt = null;
   let quizDraft = [], draftTask = null, retryIds = null, offlineState = location.protocol === 'file:' ? 'Портативный режим' : 'Подготовка офлайн…';
@@ -40,17 +38,7 @@
   const fmtDate = s => new Date(s).toLocaleString('ru-RU', {day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
   function rich(text) { return esc(text).replace(/\[IMG:([^\]]+)\]/g, (_, file) => `<img class="task-image" src="assets/tasks/${encodeURIComponent(file)}" alt="Формула или схема из задания" loading="lazy">`); }
   function markdown(text) {
-    const math = [];
-    let s = text.replace(/\$\$[\s\S]*?\$\$|\$[^$\n]+\$/g, x => `MATHPLACEHOLDER${math.push(x)-1}END`);
-    // Strip arbitrary HTML before parsing source Markdown.
-    s = s.replace(/<!--[\s\S]*?-->/g, '').replace(/<[^>]+>/g, '');
-    s = s.replace(/!\[\[([^\]]+)\]\]/g, (_, path) => {
-      const file = path.split('/').pop(), folder = path.includes('Иллюстрации') ? 'slides' : 'tasks';
-      return `![Иллюстрация из материалов](assets/${folder}/${encodeURIComponent(file)})`;
-    });
-    s = s.replace(/\[\[([^\]]+)\]\]/g, '$1');
-    let html = marked.parse(s, {breaks:false, gfm:true});
-    html = html.replace(/MATHPLACEHOLDER(\d+)END/g, (_, i) => esc(math[Number(i)]));
+    const html = TIIK_FORMAT.render(text, marked, katex);
     // Only internal image resources and safe links are allowed in notes.
     const dom = document.createElement('template'); dom.innerHTML = html;
     dom.content.querySelectorAll('a').forEach(a => { const href = a.getAttribute('href') || ''; if (!/^(https?:\/\/|#)/i.test(href)) a.removeAttribute('href'); else { a.target='_blank'; a.rel='noopener noreferrer'; } });
@@ -73,16 +61,20 @@
   }
   function save() {
     if (corruptStorage) { toast('Сначала скачайте повреждённые данные или восстановите резервную копию в настройках.'); return false; }
-    try { localStorage.setItem(KEY, JSON.stringify(progress)); return true; }
-    catch (e) { storageError=true; toast('Не удалось сохранить прогресс. Скачайте резервную копию в настройках.'); return false; }
+    progress.updatedAt = Math.max(Date.now(), (Number(progress.updatedAt) || 0) + 1);
+    TIIK_STORAGE.save(progress).then(()=>{storageError=false;}).catch(()=>{
+      storageError=true;toast('Не удалось сохранить прогресс. Скачайте резервную копию в настройках.');
+    });
+    return true;
   }
+
   function toast(message) { const el=$('#toast');el.textContent=message;el.classList.add('visible');clearTimeout(toast.timer);toast.timer=setTimeout(()=>el.classList.remove('visible'),4200); }
   function go(next) { page=next;location.hash=next;showSolution=false;render();window.scrollTo(0,0); }
   function button(label, action, cls='') { return `<button class="button ${cls}" data-action="${action}">${label}</button>`; }
   function empty(text, name='book') { return `<div class="empty">${icon(name)}${text}</div>`; }
   function navButton(id, label, name) { return `<button data-page="${id}" class="${page===id || (id==='setup' && ['quiz','result'].includes(page)) ? 'active':''}">${icon(name)}<span>${label}</span></button>`; }
   function shell(content) {
-    return `<div class="layout"><aside class="sidebar"><a class="brand" href="#home"><img src="icon.svg" alt=""><span><b>ТИиК Тренажёр</b><small>Практика. Понимание. Результат.</small></span></a><nav class="nav" aria-label="Основная навигация">${navButton('home','Главная','home')}${navButton('topics','Темы','topics')}${navButton('setup','Тесты','test')}${navButton('stats','Статистика','stats')}${navButton('theory','Метода','book')}${navButton('settings','Настройки','settings')}</nav><div class="sidebar-bottom"><span class="online-dot"></span>Личная подготовка<strong>Экзамен становится ближе.<br>А ты — увереннее.</strong><span id="offline-label">${offlineState}</span><br>Банк: ${bank.tasks.length} заданий · часть 2</div></aside><main class="main"><header class="topbar"><span>Подготовка к экзамену / ТИиК · часть 2</span><div class="mobile-title"><img src="icon.svg" alt="">ТИиК Тренажёр</div><span class="pill">${icon('shield')} Прогресс на этом устройстве</span></header>${corruptStorage?'<p class="danger-note">Сохранённые данные не удалось прочитать. Исходная копия сохранена. Откройте настройки для восстановления.</p>':''}${storageError?'<p class="danger-note">Хранилище браузера недоступно или заполнено. Скачайте прогресс в настройках.</p>':''}${content}<footer>Теория информации и кодирования · Твой темп, твой результат</footer></main></div>`;
+    return `<div class="layout"><aside class="sidebar"><a class="brand" href="#home"><img src="icon.svg" alt=""><span><b>ТИиК Тренажёр</b><small>Практика. Понимание. Результат.</small></span></a><nav class="nav" aria-label="Основная навигация">${navButton('home','Главная','home')}${navButton('topics','Темы','topics')}${navButton('setup','Тесты','test')}${navButton('stats','Статистика','stats')}${navButton('theory','Метода','book')}${navButton('settings','Настройки','settings')}</nav><div class="sidebar-bottom"><span class="online-dot"></span>Личная подготовка<strong>Экзамен становится ближе.<br>А ты — увереннее.</strong><span id="offline-label">${offlineState}</span><br>Банк: ${bank.tasks.length} заданий · часть 2</div></aside><main class="main"><header class="topbar"><span>Подготовка к экзамену / ТИиК · часть 2</span><div class="mobile-title"><img src="icon.svg" alt="">ТИиК Тренажёр</div><span class="pill">${icon('shield')} Прогресс сохраняется</span></header>${corruptStorage?'<p class="danger-note">Сохранённые данные не удалось прочитать. Исходная копия сохранена. Откройте настройки для восстановления.</p>':''}${storageError?'<p class="danger-note">Хранилище браузера недоступно или заполнено. Скачайте прогресс в настройках.</p>':''}${content}<footer>Теория информации и кодирования · Твой темп, твой результат</footer></main></div>`;
   }
   function heading(title, subtitle, extra='') { return `<div class="pagehead"><div><div class="eyebrow">Теория информации и кодирования</div><h1>${title}</h1><p>${subtitle}</p></div>${extra}</div>`; }
   function metrics(attempts=progress.attempts) {
@@ -189,7 +181,7 @@
   }
   function theoryPage() {const t=topic(theoryTopic);return heading('Твоя метода','Понятные объяснения, формулы и иллюстрации из материалов.')+`<div class="theory-pick"><select id="theory-topic" aria-label="Тема методических материалов">${bank.topics.map(t=>`<option value="${t.id}" ${t.id===theoryTopic?'selected':''}>${esc(t.title)}</option>`).join('')}</select>${button('Потренировать тему','practice-topic','small')}</div><article class="panel markdown">${markdown(t.theory)}</article>`;}
   function settingsPage() {
-    return heading('Настройки и перенос','Твои данные принадлежат тебе. Сохраняй их там, где удобно.')+`<section class="panel"><h2>Прогресс и резервная копия</h2><div class="settings-row"><div><b>Перенести результаты на другое устройство</b><p>Скачай файл, передай его на телефон или компьютер и выбери «Загрузить». Импорт заменяет текущий прогресс.</p></div><div class="buttons">${button(icon('download')+' Скачать','export','small')}${button('Загрузить','import','outline small')}</div></div><div class="settings-row"><div><b>Банк заданий SQLite</b><p>Все 529 заданий, ответы, разборы, теория и изображения в одном файле. Прогресс хранится отдельно в браузере.</p></div><a class="button outline small" href="bank.sqlite" download>Скачать SQLite</a></div>${corruptStorage?`<div class="settings-row"><div><b>Восстановление хранилища</b><p>Скачай исходные данные перед сбросом или импортируй рабочую копию.</p></div>${button('Скачать исходные данные','raw-export','outline small')}</div>`:''}<div class="settings-row"><div><b>Сбросить прогресс</b><p>Удалить ответы, историю тестов и закладки с этого устройства.</p></div>${button('Сбросить','reset','danger small')}</div></section><section class="panel"><h2>Установить приложение</h2><div class="settings-row"><div><b>Android · Chrome</b><p>Открой приложение по защищённому адресу HTTPS, затем меню браузера → «Добавить на главный экран» → «Установить».</p></div>${button('Установить','install','small')}</div><div class="settings-row"><div><b>iPhone · Safari</b><p>Открой HTTPS-адрес в Safari → «Поделиться» → «На экран Домой». Перед первым запуском без интернета дождись сообщения «Готово к работе офлайн».</p></div></div><div class="settings-row"><div><b>Компьютер · Windows</b><p>Запусти «Запустить.cmd» из папки приложения. Установки Python и Node.js не требуется. В Chrome или Edge приложение можно установить кнопкой в адресной строке.</p></div></div><div class="note">${icon('shield')} ${esc(offlineState)}. ${location.protocol==='file:'?'Сейчас приложение открыто как файл. Для установки и надёжного сохранения прогресса используй запуск через «Запустить.cmd» или HTTPS.':'Для установки на телефон нужен HTTPS. Адрес компьютера в домашней Wi-Fi-сети позволяет открыть приложение, но не даёт полноценную офлайн-установку.'}</div></section><section class="panel"><h2>О материалах</h2><p class="muted">Банк: ${esc(bank.source)}. Пояснения — из папки «Метода». Разборы сохранены в том виде, в котором есть в конспектах: часть содержит вычисления по шагам, часть — общий алгоритм и конкретный ответ.</p><p class="muted">Правильность ответа сверяется с исходным банком. Для чисел используются его допуски; отдельная независимая проверка всех ответов не проводилась.</p><p class="muted">Синхронизация между устройствами — через файл прогресса. Очищая данные браузера, можно удалить результаты, поэтому периодически скачивай резервную копию.</p></section><input class="import-input" type="file" id="import-file" accept=".json,application/json">`;
+    return heading('Настройки и перенос','Твои данные принадлежат тебе. Сохраняй их там, где удобно.')+`<section class="panel"><h2>Прогресс и резервная копия</h2><div class="settings-row"><div><b>Перенести результаты на другое устройство</b><p>Скачай файл, передай его на телефон или компьютер и выбери «Загрузить». Импорт заменяет текущий прогресс.</p></div><div class="buttons">${button(icon('download')+' Скачать','export','small')}${button('Загрузить','import','outline small')}</div></div><div class="settings-row"><div><b>Банк заданий SQLite</b><p>Все 529 заданий, ответы, разборы, теория и изображения в одном файле. Прогресс хранится отдельно: в браузере и, при запуске на компьютере, в файле data/progress.json.</p></div><a class="button outline small" href="bank.sqlite" download>Скачать SQLite</a></div>${corruptStorage?`<div class="settings-row"><div><b>Восстановление хранилища</b><p>Скачай исходные данные перед сбросом или импортируй рабочую копию.</p></div>${button('Скачать исходные данные','raw-export','outline small')}</div>`:''}<div class="settings-row"><div><b>Сбросить прогресс</b><p>Удалить ответы, историю тестов и закладки с этого устройства.</p></div>${button('Сбросить','reset','danger small')}</div></section><section class="panel"><h2>Установить приложение</h2><div class="settings-row"><div><b>Android · Chrome</b><p>Открой приложение по защищённому адресу HTTPS, затем меню браузера → «Добавить на главный экран» → «Установить».</p></div>${button('Установить','install','small')}</div><div class="settings-row"><div><b>iPhone · Safari</b><p>Открой HTTPS-адрес в Safari → «Поделиться» → «На экран Домой». Перед первым запуском без интернета дождись сообщения «Готово к работе офлайн».</p></div></div><div class="settings-row"><div><b>Компьютер · Windows</b><p>Запусти «Запустить.cmd» из папки приложения. Установки Python и Node.js не требуется. В Chrome или Edge приложение можно установить кнопкой в адресной строке.</p></div></div><div class="note">${icon('shield')} ${esc(offlineState)}. ${location.protocol==='file:'?'Сейчас приложение открыто как файл. Для установки и надёжного сохранения прогресса используй запуск через «Запустить.cmd» или HTTPS.':'Для установки на телефон нужен HTTPS. Адрес компьютера в домашней Wi-Fi-сети позволяет открыть приложение, но не даёт полноценную офлайн-установку.'}</div></section><section class="panel"><h2>О материалах</h2><p class="muted">Банк: ${esc(bank.source)}. Решения всех заданий — из файла «Ответы с gemini.md». Теория по темам — из папки «Метода». Формулы и числовые матрицы отображаются локально.</p><p class="muted">Правильность ответа сверяется с исходным банком. Для чисел используются его допуски; отдельная независимая проверка всех ответов не проводилась.</p><p class="muted">На компьютере при запуске через «Запустить.cmd» прогресс дополнительно сохраняется в data/progress.json рядом с приложением и восстанавливается при следующем запуске. В браузере используются две локальные копии. Для переноса на телефон скачивай резервную копию.</p></section><input class="import-input" type="file" id="import-file" accept=".json,application/json">`;
   }
   function download(text,name,type='application/json') {const a=document.createElement('a'),url=URL.createObjectURL(new Blob([text],{type}));a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
   function confirmDialog(title,message,label,callback) {
@@ -219,7 +211,6 @@
     const views={home,topics:topicsPage,setup,quiz,result:resultPage,stats:statsPage,detail:detailPage,theory:theoryPage,settings:settingsPage};
     if(!views[page])page='home';
     $('#app').innerHTML=shell(views[page]());
-    if(window.renderMathInElement)renderMathInElement($('#app'),{delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}],throwOnError:false,strict:false,trust:false});
     if(window.mermaid){
       const nodes=[];
       document.querySelectorAll('code.language-mermaid').forEach(code=>{
@@ -272,5 +263,11 @@
     navigator.serviceWorker.addEventListener('message',e=>{if(e.data?.type==='offline-ready'){offlineLabel('Готово к работе офлайн');toast('Все задания и иллюстрации сохранены. Можно заниматься без интернета.');}if(e.data?.type==='offline-error'){offlineLabel('Офлайн-копия не загружена');toast('Не удалось загрузить офлайн-копию. Перезапусти приложение с интернетом.');}});
     navigator.serviceWorker.register('./sw.js').then(async ()=>{await navigator.serviceWorker.ready;if(await caches.match(new URL('./offline-ready',location.href)))offlineLabel('Готово к работе офлайн');}).catch(()=>offlineLabel('Офлайн-установка недоступна'));
   }
-  render();
+  window.addEventListener('tiik-storage-error',e=>toast(e.detail));
+  window.addEventListener('pagehide',()=>{TIIK_STORAGE.flush();});
+  TIIK_STORAGE.load(validProgress).then(state=>{
+    if(state.progress)progress=state.progress;
+    corruptStorage=state.corrupt;render();
+    if(state.progress&&state.serverAvailable)TIIK_STORAGE.save(progress).catch(()=>{});
+  }).catch(()=>{storageError=true;render();});
 })();

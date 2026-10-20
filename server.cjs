@@ -1,11 +1,14 @@
-/* Portable static server. Only app/ is exposed, no write endpoints. */
+/* Static app + loopback-only progress backup. Data files are never served. */
 const http=require('node:http'),fs=require('node:fs'),path=require('node:path'),os=require('node:os');
 const {spawn}=require('node:child_process');
+const {createStore,api}=require('./progress-store.cjs');
+const progressAPI=api(createStore(process.env.TIIK_DATA_DIR||path.join(__dirname,'data')));
 const root=path.join(__dirname,'app'),port=Number(process.env.PORT||8765);
 const types={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json; charset=utf-8','.webmanifest':'application/manifest+json','.svg':'image/svg+xml','.png':'image/png','.jpg':'image/jpeg','.woff2':'font/woff2','.sqlite':'application/vnd.sqlite3'};
 const server=http.createServer((req,res)=>{
+  if(req.url.split('?')[0]==='/api/progress')return progressAPI(req,res);
   if(!['GET','HEAD'].includes(req.method)){res.writeHead(405);return res.end();}
-  let pathname;try{pathname=decodeURIComponent(new URL(req.url,'http://localhost').pathname);}catch{res.writeHead(400);return res.end();}
+  let pathname;try{pathname=decodeURIComponent(new URL(req.url,'http://localhost').pathname);if(pathname.includes('\0'))throw Error('Bad path');}catch{res.writeHead(400);return res.end();}
   if(pathname.endsWith('/'))pathname+='index.html';
   const file=path.resolve(root,'.'+pathname);
   if(!file.startsWith(root+path.sep)){res.writeHead(403);return res.end();}

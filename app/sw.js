@@ -1,5 +1,5 @@
 /* tools/build_bank.py derives CACHE from all application resources. */
-const CACHE = 'tiik-2f69886816c52ae6';
+const CACHE = 'tiik-9072b1cdf38fa21c';
 async function notify(type) { for (const client of await self.clients.matchAll({includeUncontrolled:true})) client.postMessage({type}); }
 self.addEventListener('install',event=>event.waitUntil((async()=>{
   const cache=await caches.open(CACHE);
@@ -23,6 +23,7 @@ self.addEventListener('activate',event=>event.waitUntil((async()=>{
 })()));
 self.addEventListener('fetch',event=>{
   if(event.request.method!=='GET' || new URL(event.request.url).origin!==self.location.origin)return;
+  if(new URL(event.request.url).pathname.endsWith('/api/progress'))return;
   event.respondWith((async()=>{
     const cache=await caches.open(CACHE),url=new URL(event.request.url);
     const cached=await cache.match(event.request);

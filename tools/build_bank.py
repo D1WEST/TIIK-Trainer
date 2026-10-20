@@ -78,6 +78,15 @@ def main():
             solutions[int(m[1])]={'topic':topic_id,'markdown':content[m.end():end].strip()}
     slide_src=SOURCE/'Метода'/'Иллюстрации из презентации'
     shutil.copytree(slide_src, APP/'assets'/'slides',dirs_exist_ok=True)
+    replacement=PROJECT/'sources'/'Ответы с gemini.md'
+    if replacement.exists():
+        content=replacement.read_text(encoding='utf-8-sig')
+        sections=list(re.finditer(r'^##\s+Вопрос\s+(\d+)\s*:\s*$',content,re.M))
+        ids=[int(m[1]) for m in sections]
+        assert len(ids)==529 and set(ids)==set(solutions), 'Gemini solutions must contain each question 1..529 exactly once'
+        for i,m in enumerate(sections):
+            end=sections[i+1].start() if i+1<len(sections) else len(content)
+            solutions[int(m[1])]['markdown']=content[m.end():end].strip()
     tasks=[]
     for t in raw:
         rows=t.pop('rows');kind=rows[2][0];tail=rows[3:]
@@ -110,6 +119,9 @@ def main():
     for topic in topics:topic['count']=sum(t['topic']==topic['id'] for t in tasks)
     bank={'schemaVersion':1,'title':'ТИиК Тренажёр','source':DOCX.name,
           'sourceSha256':hashlib.sha256(DOCX.read_bytes()).hexdigest(), 'topics':topics,'tasks':tasks}
+    if replacement.exists():
+        bank['solutionSource']=replacement.name
+        bank['solutionSourceSha256']=hashlib.sha256(replacement.read_bytes()).hexdigest()
     payload=json.dumps(bank,ensure_ascii=False,separators=(',',':'))
     (APP/'bank.json').write_text(payload,encoding='utf-8')
     (APP/'bank.js').write_text('window.TIIK_BANK='+payload+';',encoding='utf-8')

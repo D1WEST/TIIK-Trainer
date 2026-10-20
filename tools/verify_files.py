@@ -4,6 +4,14 @@ from pathlib import Path
 
 app=Path(__file__).resolve().parents[1]/'app'
 bank=json.loads((app/'bank.json').read_text(encoding='utf-8'))
+replacement=app.parent/'sources'/'Ответы с gemini.md'
+if replacement.exists():
+    text=replacement.read_text(encoding='utf-8-sig')
+    sections=list(re.finditer(r'^##\s+Вопрос\s+(\d+)\s*:\s*$',text,re.M))
+    assert len(sections)==529
+    for i,m in enumerate(sections):
+        end=sections[i+1].start() if i+1<len(sections) else len(text)
+        assert next(t for t in bank['tasks'] if t['id']==int(m[1]))['solution']==text[m.end():end].strip()
 database=sqlite3.connect(app/'bank.sqlite')
 assert database.execute('PRAGMA integrity_check').fetchone()[0]=='ok'
 assert database.execute('SELECT count(*) FROM tasks').fetchone()[0]==529
